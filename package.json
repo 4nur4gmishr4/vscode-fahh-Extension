@@ -1,0 +1,46 @@
+{
+    "name": "fahh",
+    "displayName": "Fahh",
+    "description": "Plays a sound whenever a task, build, or terminal command fails.",
+    "version": "1.0.0",
+    "publisher": "anura",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/4nur4gmishr4/vscode-fahh-Extension"
+    },
+    "engines": {
+        "vscode": "^1.80.0"
+    },
+    "categories": [
+        "Other"
+    ],
+    "keywords": [
+        "sound",
+        "audio",
+        "fail",
+        "error",
+        "notification"
+    ],
+    "icon": "FahhLogo.png",
+    "galleryBanner": {
+        "color": "#1e1e1e",
+        "theme": "dark"
+    },
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "main": "./out/extension.js",
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "lint": "tsc --noEmit",
+        "package": "npx @vscode/vsce package"
+    },
+    "devDependencies": {
+        "@types/node": "18.x",
+        "@types/vscode": "^1.80.0",
+        "typescript": "^5.2.2"
+    }
+}
