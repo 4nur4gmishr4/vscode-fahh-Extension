@@ -3,7 +3,8 @@
     "displayName": "Fahh",
     "description": "Plays a sound whenever a task, build, or terminal command fails.",
     "version": "1.0.0",
-    "publisher": "anura",
+    "publisher": "4nur4gmishr4",
+    "author": "Anurag Mishra",
     "license": "MIT",
     "repository": {
         "type": "git",
