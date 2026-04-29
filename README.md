@@ -1,4 +1,9 @@
-# Fahh
+# Fahh! 🔊
+
+[![CI](https://github.com/4nur4gmishr4/vscode-fahh-Extension/actions/workflows/ci.yml/badge.svg)](https://github.com/4nur4gmishr4/vscode-fahh-Extension/actions/workflows/ci.yml)
+[![Installs](https://img.shields.io/visual-studio-marketplace/i/AnuragMishra.fahh)](https://marketplace.visualstudio.com/items?itemName=AnuragMishra.fahh)
+[![Rating](https://img.shields.io/visual-studio-marketplace/r/AnuragMishra.fahh)](https://marketplace.visualstudio.com/items?itemName=AnuragMishra.fahh)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 > Plays a sound when things go wrong (and can celebrate when they go right).
 

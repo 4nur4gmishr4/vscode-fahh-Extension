@@ -1,0 +1,27 @@
+name: Bug Report
+description: File a bug report to help us improve
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report!
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      placeholder: e.g. Windows 11, macOS Sonoma, WSL2
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Current Behavior
+      description: What is happening?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Extension Logs
+      description: Please paste logs from the "Fahh" output channel.
