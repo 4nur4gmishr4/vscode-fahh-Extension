@@ -2,7 +2,7 @@
     "name": "fahh",
     "displayName": "Fahh",
     "description": "Plays a sound whenever a task, build, or terminal command fails.",
-    "version": "2.1.0",
+    "version": "2.1.2",
     "publisher": "4nur4gmishr4",
     "author": "Anurag Mishra",
     "license": "MIT",
@@ -554,11 +554,16 @@
         "vscode:prepublish": "npm run compile",
         "compile": "tsc -p ./",
         "watch": "tsc -watch -p ./",
+        "clean": "node -e \"require('fs').rmSync('out', {recursive: true, force: true})\" && node -e \"require('fs').rmSync('coverage', {recursive: true, force: true})\" && node -e \"require('fs').rmSync('*.vsix', {force: true})\"",
         "lint": "tsc --noEmit",
+        "lint:fix": "tsc --noEmit && echo 'TypeScript compilation successful'",
         "test": "jest",
         "test:coverage": "jest --coverage",
         "test:watch": "jest --watch",
-        "package": "npx @vscode/vsce package"
+        "prebuild": "npm run clean && npm run lint",
+        "build": "npm run compile",
+        "package": "npx @vscode/vsce package",
+        "package:prod": "npm run clean && npm run lint && npm run test && npm run compile && npx @vscode/vsce package"
     },
     "devDependencies": {
         "@types/jest": "^29.5.10",

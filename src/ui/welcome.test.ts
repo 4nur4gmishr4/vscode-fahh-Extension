@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { WelcomePanel } from './welcome';
 
-const CLIENT_SCRIPT_PATH = path.resolve(__dirname, '..', 'resources', 'welcome-client.js');
+const CLIENT_SCRIPT_PATH = path.resolve(__dirname, '..', '..', 'resources', 'welcome-client.js');
 
 interface FahhWelcomeApi {
     triggerTest(): void;

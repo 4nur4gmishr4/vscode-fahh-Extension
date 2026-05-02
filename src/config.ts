@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { LogLevel } from './logger';
+import type { LogLevel } from './utils/logger';
 
 export type FailureSource =
     | 'task'
@@ -38,6 +38,7 @@ export interface PerSourceVolumes {
 
 export interface FahhConfig {
     enabled: boolean;
+    soundPack: string;
     soundPath: string;
     soundFolder: string;
     sounds: PerSourceSounds;
@@ -66,9 +67,14 @@ export interface FahhConfig {
     speakLabel: boolean;
     webhookUrl: string;
     aiSummaryEnabled: boolean;
+    aiProvider: string;
+    openrouterApiKey: string;
+    openrouterModel: string;
     dailySummary: boolean;
     streakCounter: boolean;
     bossFightMode: boolean;
+    errorExplanationEnabled: boolean;
+    errorExplanationAutoShow: boolean;
 }
 
 const SECTION = 'fahh';
@@ -95,8 +101,21 @@ export function readConfig(): FahhConfig {
         volumes[source] = clamp(cfg.get<number>(`volumes.${source}`, -1), -1, 100);
     }
 
+    // Validate quiet hours format
+    const quietHoursFrom = cfg.get<string>('quietHours.from', '22:00');
+    const quietHoursTo = cfg.get<string>('quietHours.to', '08:00');
+    const validTimeFormat = /^([01]?[0-9]|2[0-3]):([0-5][0-9])$/;
+    
+    if (!validTimeFormat.test(quietHoursFrom)) {
+        console.warn(`Invalid quiet hours 'from' format: ${quietHoursFrom}. Using default 22:00`);
+    }
+    if (!validTimeFormat.test(quietHoursTo)) {
+        console.warn(`Invalid quiet hours 'to' format: ${quietHoursTo}. Using default 08:00`);
+    }
+
     return {
         enabled: cfg.get<boolean>('enabled', true),
+        soundPack: cfg.get<string>('soundPack', 'fahh.mp3'),
         soundPath: cfg.get<string>('soundPath', '').trim(),
         soundFolder: cfg.get<string>('soundFolder', '').trim(),
         sounds,
@@ -117,8 +136,8 @@ export function readConfig(): FahhConfig {
         flashStatusBar: cfg.get<boolean>('flashStatusBar', true),
         quietHours: {
             enabled: cfg.get<boolean>('quietHours.enabled', false),
-            from: cfg.get<string>('quietHours.from', '22:00'),
-            to: cfg.get<string>('quietHours.to', '08:00')
+            from: validTimeFormat.test(quietHoursFrom) ? quietHoursFrom : '22:00',
+            to: validTimeFormat.test(quietHoursTo) ? quietHoursTo : '08:00'
         },
         muteWhenFocused: cfg.get<boolean>('muteWhenFocused', false),
         snoozeMinutes: clamp(cfg.get<number>('snoozeMinutes', 10), 1, 1440),
@@ -129,9 +148,14 @@ export function readConfig(): FahhConfig {
         speakLabel: cfg.get<boolean>('speakLabel', false),
         webhookUrl: cfg.get<string>('webhookUrl', '').trim(),
         aiSummaryEnabled: cfg.get<boolean>('aiSummary.enabled', false),
+        aiProvider: cfg.get<string>('aiProvider', 'copilot'),
+        openrouterApiKey: cfg.get<string>('openrouterApiKey', '').trim(),
+        openrouterModel: cfg.get<string>('openrouterModel', 'meta-llama/llama-3.2-3b-instruct:free'),
         dailySummary: cfg.get<boolean>('dailySummary', false),
         streakCounter: cfg.get<boolean>('streakCounter', false),
-        bossFightMode: cfg.get<boolean>('bossFightMode', false)
+        bossFightMode: cfg.get<boolean>('bossFightMode', false),
+        errorExplanationEnabled: cfg.get<boolean>('errorExplanation.enabled', true),
+        errorExplanationAutoShow: cfg.get<boolean>('errorExplanation.autoShow', true)
     };
 }
 

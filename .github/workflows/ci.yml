@@ -7,7 +7,10 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -15,5 +18,9 @@ jobs:
           node-version: 20
           cache: 'npm'
       - run: npm install
+      - run: npm run lint
       - run: npm run compile
       - run: npm test
+      - name: Run security audit
+        run: npm audit --audit-level=moderate
+        continue-on-error: true

@@ -14,8 +14,13 @@
         "noUnusedLocals": true,
         "noUnusedParameters": true,
         "noFallthroughCasesInSwitch": true,
-        "noImplicitOverride": true
+        "noImplicitOverride": true,
+        "incremental": true,
+        "tsBuildInfoFile": "./out/.tsbuildinfo",
+        "declaration": false,
+        "declarationMap": false,
+        "removeComments": true
     },
     "include": ["src/**/*"],
-    "exclude": ["node_modules", ".vscode-test", "out", "src/**/*.test.ts", "src/**/*.spec.ts"]
+    "exclude": ["node_modules", ".vscode-test", "out", "coverage", "src/**/*.test.ts", "src/**/*.spec.ts", "__mocks__"]
 }

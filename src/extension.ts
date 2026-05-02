@@ -1,42 +1,63 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import { AudioPlayer } from './audioPlayer';
-import { FahhConfig, FailureSource, affectsFahh, readConfig, updateEnabled, updateSoundPath, updateSoundFolder, resetAllSettings } from './config';
-import { registerFailureDetectors, FailureHandler, SuccessHandler } from './failureDetector';
-import { Logger } from './logger';
-import { Scheduler } from './scheduler';
-import { SoundResolver } from './soundResolver';
-import { StatusBarManager } from './statusBar';
-import { HistoryManager, HistoryEntry } from './history';
-import { IntegrationsManager } from './integrations';
-import { WelcomePanel } from './welcome';
+import { AudioPlayer } from './core/audioPlayer';
+import { FahhConfig, FailureSource, HistoryEntry } from './types';
+import { ConfigManager } from './config/configManager';
+import { SecretManager } from './config/secretManager';
+import { registerFailureDetectors, FailureHandler, SuccessHandler } from './core/failureDetector';
+import { Logger } from './utils/logger';
+import { Scheduler } from './utils/scheduler';
+import { SoundResolver } from './core/soundResolver';
+import { StatusBarManager } from './ui/statusBar';
+import { HistoryManager } from './utils/history';
+import { IntegrationsManager } from './integrations/integrations';
+import { WelcomePanel } from './ui/welcome';
+import { ErrorExplanationManager } from './ui/errorExplanation';
 
+/**
+ * Main extension class that orchestrates all Fahh components.
+ * Manages the lifecycle of the extension and coordinates between core, config, UI, and integration layers.
+ */
 class FahhExtension {
     private readonly logger: Logger;
     private readonly player: AudioPlayer;
+    private readonly configManager: ConfigManager;
+    private readonly secretManager: SecretManager;
     private readonly scheduler: Scheduler;
     private readonly soundResolver: SoundResolver;
     private readonly statusBar: StatusBarManager;
     private readonly history: HistoryManager;
     private readonly integrations: IntegrationsManager;
+    private readonly errorExplanation: ErrorExplanationManager;
     private config: FahhConfig;
     private detectors: vscode.Disposable | null = null;
     private historyView: vscode.TreeView<vscode.TreeItem> | null = null;
 
+    /**
+     * Creates a new FahhExtension instance.
+     * @param ctx - The VS Code extension context
+     */
     public constructor(private readonly ctx: vscode.ExtensionContext) {
         this.logger = new Logger('Fahh');
         this.player = new AudioPlayer(this.logger);
-        this.config = readConfig();
+        this.configManager = new ConfigManager(ctx.secrets);
+        this.secretManager = new SecretManager(ctx.secrets);
+        this.config = this.configManager.readConfig();
         this.logger.setLevel(this.config.logLevel);
         this.scheduler = new Scheduler(() => this.config, this.logger);
         this.soundResolver = new SoundResolver(ctx.extensionPath, () => this.config, this.logger);
-        this.statusBar = new StatusBarManager(() => this.config, this.logger);
+        this.statusBar = new StatusBarManager(() => this.config, this.logger, ctx.globalState);
         this.history = new HistoryManager(() => this.config, this.logger, ctx.globalState);
-        this.integrations = new IntegrationsManager(() => this.config, this.logger, ctx.globalState);
+        this.integrations = new IntegrationsManager(this.configManager, this.secretManager, this.logger, ctx.globalState);
+        this.errorExplanation = new ErrorExplanationManager(this.logger, this.integrations, ctx.extensionUri);
     }
 
+    /**
+     * Starts the extension by registering all components, commands, and event listeners.
+     * This method is called once during extension activation.
+     */
     public start(): void {
-        this.logger.info(`Fahh v2.1 activating on ${process.platform} (VS Code ${vscode.version}).`);
+        this.logger.info(`Fahh v2.1.2 activating on ${process.platform} (VS Code ${vscode.version}).`);
 
         this.statusBar.refresh();
         this.registerDetectors();
@@ -47,8 +68,8 @@ class FahhExtension {
 
         this.ctx.subscriptions.push(
             vscode.workspace.onDidChangeConfiguration((event) => {
-                if (!affectsFahh(event)) { return; }
-                this.config = readConfig();
+                if (!this.configManager.affectsFahh(event)) { return; }
+                this.config = this.configManager.readConfig();
                 this.logger.setLevel(this.config.logLevel);
                 this.statusBar.refresh();
                 this.integrations.onConfigChanged();
@@ -65,12 +86,20 @@ class FahhExtension {
         );
     }
 
+    /**
+     * Shows the welcome panel on first install or major version upgrades.
+     * Updates the stored version in global state.
+     */
     private async maybeShowWelcomeOnInstall(): Promise<void> {
         const version = this.ctx.extension.packageJSON.version as string;
         const lastVersion = this.ctx.globalState.get<string>('lastVersion');
         if (shouldShowWelcome(lastVersion, version)) {
             WelcomePanel.createOrShow(this.ctx.extensionUri);
         }
+        
+        // Perform API key migration for users upgrading from older versions
+        await this.migrateApiKeys(lastVersion);
+        
         if (lastVersion !== version) {
             try {
                 await this.ctx.globalState.update('lastVersion', version);
@@ -80,12 +109,139 @@ class FahhExtension {
         }
     }
 
+    /**
+     * Migrate API keys from plaintext configuration to secure SecretStorage.
+     * 
+     * This method handles the migration of API keys for users upgrading from versions
+     * that stored keys in plaintext configuration to the new secure storage system.
+     * It also prompts users to configure their own API keys if they were using the
+     * hardcoded OpenRouter key.
+     * 
+     * @param lastVersion - The previously installed version, or undefined for first install
+     */
+    private async migrateApiKeys(lastVersion: string | undefined): Promise<void> {
+        // Skip migration on first install
+        if (!lastVersion) {
+            return;
+        }
+
+        // Check if migration has already been performed
+        const migrationCompleted = this.ctx.globalState.get<boolean>('apiKeyMigrationCompleted', false);
+        if (migrationCompleted) {
+            return;
+        }
+
+        this.logger.info('Starting API key migration...');
+
+        try {
+            const cfg = vscode.workspace.getConfiguration('fahh');
+            
+            // Check if user has OpenRouter API key in plaintext config
+            const plaintextApiKey = cfg.get<string>('openrouterApiKey', '').trim();
+            
+            if (plaintextApiKey && plaintextApiKey.length > 0) {
+                // Migrate plaintext API key to SecretStorage
+                this.logger.info('Migrating OpenRouter API key from plaintext to secure storage...');
+                
+                try {
+                    await this.secretManager.storeApiKey('openrouter', plaintextApiKey);
+                    
+                    // Clear the plaintext key from configuration
+                    await cfg.update('openrouterApiKey', '', vscode.ConfigurationTarget.Global);
+                    await cfg.update('openrouterApiKey', '', vscode.ConfigurationTarget.Workspace);
+                    
+                    this.logger.info('API key migration completed successfully');
+                    
+                    void vscode.window.showInformationMessage(
+                        'Fahh: Your OpenRouter API key has been migrated to secure storage.'
+                    );
+                } catch (err) {
+                    this.logger.error(`Failed to migrate API key: ${err instanceof Error ? err.message : String(err)}`);
+                    
+                    void vscode.window.showWarningMessage(
+                        'Fahh: Failed to migrate API key to secure storage. Please reconfigure your OpenRouter API key in settings.'
+                    );
+                }
+            } else {
+                // Check if user is using OpenRouter provider but has no API key configured
+                const aiProvider = cfg.get<string>('aiProvider', 'copilot');
+                const hasStoredKey = await this.secretManager.hasApiKey('openrouter');
+                
+                if (aiProvider === 'openrouter' && !hasStoredKey) {
+                    // User might have been using the hardcoded key - prompt them to configure their own
+                    this.logger.info('User is using OpenRouter but has no API key configured');
+                    
+                    const action = await vscode.window.showWarningMessage(
+                        'Fahh: OpenRouter API key is required. The hardcoded key has been removed for security. Please configure your own API key.',
+                        'Configure Now',
+                        'Switch to Copilot',
+                        'Disable AI Features'
+                    );
+                    
+                    if (action === 'Configure Now') {
+                        const apiKey = await vscode.window.showInputBox({
+                            prompt: 'Enter your OpenRouter API key (starts with sk-or-v1-)',
+                            password: true,
+                            placeHolder: 'sk-or-v1-...',
+                            validateInput: (value) => {
+                                if (!value || value.trim().length === 0) {
+                                    return 'API key cannot be empty';
+                                }
+                                if (!value.startsWith('sk-or-v1-')) {
+                                    return 'Invalid OpenRouter API key format. Expected: sk-or-v1-...';
+                                }
+                                return null;
+                            }
+                        });
+                        
+                        if (apiKey) {
+                            try {
+                                await this.secretManager.storeApiKey('openrouter', apiKey);
+                                void vscode.window.showInformationMessage('Fahh: OpenRouter API key configured successfully.');
+                            } catch (err) {
+                                this.logger.error(`Failed to store API key: ${err instanceof Error ? err.message : String(err)}`);
+                                void vscode.window.showErrorMessage(`Fahh: Failed to store API key: ${err instanceof Error ? err.message : String(err)}`);
+                            }
+                        }
+                    } else if (action === 'Switch to Copilot') {
+                        await cfg.update('aiProvider', 'copilot', vscode.ConfigurationTarget.Global);
+                        void vscode.window.showInformationMessage('Fahh: Switched to GitHub Copilot for AI features.');
+                    } else if (action === 'Disable AI Features') {
+                        await cfg.update('aiSummary.enabled', false, vscode.ConfigurationTarget.Global);
+                        await cfg.update('errorExplanation.enabled', false, vscode.ConfigurationTarget.Global);
+                        void vscode.window.showInformationMessage('Fahh: AI features disabled.');
+                    }
+                }
+            }
+            
+            // Mark migration as completed
+            await this.ctx.globalState.update('apiKeyMigrationCompleted', true);
+            this.logger.info('API key migration process completed');
+            
+        } catch (err) {
+            this.logger.error(`Error during API key migration: ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
+
+    /**
+     * Registers failure and success detectors for tasks, terminals, and diagnostics.
+     * Disposes of any existing detectors before registering new ones.
+     */
     private registerDetectors(): void {
+        if (this.detectors) {
+            this.detectors.dispose();
+        }
         const onFailure: FailureHandler = (event) => this.handleFailure(event.source, event.label);
         const onSuccess: SuccessHandler = (event) => this.handleSuccess(event.source, event.label);
         this.detectors = registerFailureDetectors(() => this.config, onFailure, onSuccess, this.logger);
     }
 
+    /**
+     * Handles a detected failure event.
+     * Plays sound, shows notifications, records history, and triggers integrations.
+     * @param source - The source of the failure (task, terminal, or diagnostic)
+     * @param label - A human-readable description of the failure
+     */
     private async handleFailure(source: FailureSource, label: string): Promise<void> {
         if (!this.config.enabled) { return; }
         if (this.scheduler.isMuted(source)) {
@@ -97,75 +253,108 @@ class FahhExtension {
             return;
         }
 
-        this.scheduler.record(source);
-        this.statusBar.incrementCounter();
-        this.statusBar.flash();
+        try {
+            this.scheduler.record(source);
+            this.statusBar.flash();
 
-        this.logger.info(`Failure: [${source}] ${label}`);
+            this.logger.info(`Failure: [${source}] ${label}`);
 
-        // AI Summary
-        let extraMsg = '';
-        if (this.config.aiSummaryEnabled) {
-            const summary = await this.integrations.getAiSummary(label);
-            if (summary) { extraMsg = ` — ${summary}`; }
-        }
-
-        // Notification
-        if (this.config.showNotification && this.config.notificationLevel !== 'none') {
-            const msg = `${label}${extraMsg}`;
-            switch (this.config.notificationLevel) {
-                case 'info': void vscode.window.showInformationMessage(msg); break;
-                case 'warning': void vscode.window.showWarningMessage(msg); break;
-                case 'error': void vscode.window.showErrorMessage(msg); break;
+            // Sound (Triggered before AI summary to prevent latency)
+            const soundPath = await this.soundResolver.resolveForFailure(source, false);
+            if (soundPath) {
+                const volume = this.applyVolumeCurve(this.soundResolver.getVolume(source));
+                this.player.play(soundPath, { volume }).catch(err => {
+                    this.logger.debug(`Playback failed: ${err instanceof Error ? err.message : String(err)}`);
+                });
             }
+
+            // AI Summary
+            let extraMsg = '';
+            if (this.config.aiSummaryEnabled) {
+                const summary = await this.integrations.getAiSummary(label);
+                if (summary) { extraMsg = ` - ${summary}`; }
+            }
+
+            // Notification
+            if (this.config.showNotification && this.config.notificationLevel !== 'none') {
+                const msg = `${label}${extraMsg}`;
+                switch (this.config.notificationLevel) {
+                    case 'info': void vscode.window.showInformationMessage(msg); break;
+                    case 'warning': void vscode.window.showWarningMessage(msg); break;
+                    case 'error': void vscode.window.showErrorMessage(msg); break;
+                }
+            }
+
+            // Voice
+            this.integrations.speak(`${source} failed: ${label}`);
+
+            // Webhook
+            this.integrations.postWebhook(label, source);
+
+            // Boss fight
+            const bossMsg = await this.integrations.recordFailure();
+            this.statusBar.refresh();
+            if (bossMsg) {
+                void vscode.window.showInformationMessage(bossMsg);
+            }
+
+            // History
+            const entry: HistoryEntry = {
+                id: `${Date.now()}-${Math.random()}`,
+                timestamp: Date.now(),
+                source,
+                label,
+                soundPath: soundPath ?? ''
+            };
+            this.history.add(entry);
+
+            // Error explanation popup
+            if (this.config.errorExplanationEnabled && this.config.errorExplanationAutoShow) {
+                this.errorExplanation.showFailureExplanation({
+                    source,
+                    label,
+                    timestamp: Date.now()
+                });
+            }
+        } catch (err) {
+            this.logger.error(`Error in handleFailure: ${err instanceof Error ? err.message : String(err)}`);
         }
-
-        // Sound
-        const soundPath = this.soundResolver.resolveForFailure(source, false);
-        if (soundPath) {
-            const volume = this.applyVolumeCurve(this.soundResolver.getVolume(source));
-            this.player.play(soundPath, { volume });
-        }
-
-        // Voice
-        this.integrations.speak(`${source} failed: ${label}`);
-
-        // Webhook
-        this.integrations.postWebhook(label, source);
-
-        // Boss fight
-        const bossMsg = this.integrations.recordFailure();
-        if (bossMsg) {
-            void vscode.window.showInformationMessage(bossMsg);
-        }
-
-        // History
-        const entry: HistoryEntry = {
-            id: `${Date.now()}-${Math.random()}`,
-            timestamp: Date.now(),
-            source,
-            label,
-            soundPath: soundPath ?? ''
-        };
-        this.history.add(entry);
     }
 
-    private handleSuccess(source: FailureSource, label: string): void {
+    /**
+     * Handles a detected success event.
+     * Plays success sound and records streak information.
+     * @param source - The source of the success (task, terminal, or diagnostic)
+     * @param label - A human-readable description of the success
+     */
+    private async handleSuccess(source: FailureSource, label: string): Promise<void> {
         if (!this.config.successEnabled) { return; }
         this.logger.debug(`Success: [${source}] ${label}`);
 
-        const soundPath = this.soundResolver.resolveForFailure(source, true);
-        if (soundPath) {
-            const volume = this.applyVolumeCurve(this.soundResolver.getVolume(source));
-            this.player.play(soundPath, { volume });
-        }
+        try {
+            const soundPath = await this.soundResolver.resolveForFailure(source, true);
+            if (soundPath) {
+                const volume = this.applyVolumeCurve(this.soundResolver.getVolume(source));
+                this.player.play(soundPath, { volume }).catch(err => {
+                    this.logger.debug(`Playback failed: ${err instanceof Error ? err.message : String(err)}`);
+                });
+            }
 
-        const streakMsg = this.integrations.recordSuccess();
-        if (streakMsg) {
-            void vscode.window.showInformationMessage(streakMsg);
+            const streakMsg = await this.integrations.recordSuccess();
+            if (streakMsg) {
+                void vscode.window.showInformationMessage(streakMsg);
+            }
+        } catch (err) {
+            this.logger.error(`Error in handleSuccess: ${err instanceof Error ? err.message : String(err)}`);
         }
     }
 
+    /**
+     * Applies a volume curve transformation to the given volume value.
+     * Supports linear (default) and logarithmic curves.
+     * @param volume - The input volume (0-100)
+     * @returns The transformed volume value (0-100)
+     */
     private applyVolumeCurve(volume: number): number {
         if (this.config.volumeCurve === 'log') {
             // Logarithmic curve: perceptually more natural
@@ -177,14 +366,21 @@ class FahhExtension {
         return volume;
     }
 
+    /**
+     * Registers the failure history tree view in the VS Code sidebar.
+     */
     private registerHistoryView(): void {
         this.historyView = vscode.window.createTreeView('fahh.history', { treeDataProvider: this.history });
     }
 
+    /**
+     * Registers all VS Code commands provided by the extension.
+     * Commands include test sounds, toggle, sound selection, history management, and settings.
+     */
     private registerCommands(): void {
         const cmds = [
             vscode.commands.registerCommand('fahh.test', async () => {
-                const soundPath = this.soundResolver.resolveForFailure('task', false);
+                const soundPath = await this.soundResolver.resolveForFailure('task', false);
                 if (!soundPath) {
                     void vscode.window.showErrorMessage('Fahh: no sound file resolved.');
                     return;
@@ -198,7 +394,7 @@ class FahhExtension {
                 }
             }),
             vscode.commands.registerCommand('fahh.testSuccess', async () => {
-                const soundPath = this.soundResolver.resolveForFailure('task', true);
+                const soundPath = await this.soundResolver.resolveForFailure('task', true);
                 if (!soundPath) {
                     void vscode.window.showErrorMessage('Fahh: no success sound resolved.');
                     return;
@@ -213,13 +409,13 @@ class FahhExtension {
             }),
             vscode.commands.registerCommand('fahh.toggle', async () => {
                 const next = !this.config.enabled;
-                await updateEnabled(next);
+                await this.configManager.updateEnabled(next);
                 void vscode.window.showInformationMessage(`Fahh ${next ? 'enabled' : 'disabled'}.`);
                 this.statusBar.refresh();
             }),
             vscode.commands.registerCommand('fahh.toggleWorkspace', async () => {
                 const next = !this.config.enabled;
-                await updateEnabled(next, vscode.ConfigurationTarget.Workspace);
+                await this.configManager.updateEnabled(next, vscode.ConfigurationTarget.Workspace);
                 void vscode.window.showInformationMessage(`Fahh ${next ? 'enabled' : 'disabled'} for this workspace.`);
                 this.statusBar.refresh();
             }),
@@ -232,7 +428,7 @@ class FahhExtension {
                     filters: { Audio: ['mp3', 'wav', 'ogg', 'flac', 'm4a'] }
                 });
                 if (!picked || picked.length === 0) { return; }
-                await updateSoundPath(picked[0].fsPath);
+                await this.configManager.updateSoundPath(picked[0].fsPath);
                 void vscode.window.showInformationMessage('Fahh sound updated.');
             }),
             vscode.commands.registerCommand('fahh.selectSoundFolder', async () => {
@@ -243,15 +439,15 @@ class FahhExtension {
                     openLabel: 'Select folder'
                 });
                 if (!picked || picked.length === 0) { return; }
-                await updateSoundFolder(picked[0].fsPath);
+                await this.configManager.updateSoundFolder(picked[0].fsPath);
                 void vscode.window.showInformationMessage('Fahh sound folder set. Sounds will be random from this folder.');
             }),
             vscode.commands.registerCommand('fahh.resetSound', async () => {
-                await updateSoundPath('');
+                await this.configManager.updateSoundPath('');
                 void vscode.window.showInformationMessage('Fahh sound reset to default.');
             }),
             vscode.commands.registerCommand('fahh.pickSoundPack', async () => {
-                const packs = this.soundResolver.listSoundPacks();
+                const packs = await this.soundResolver.listSoundPacks();
                 if (packs.length === 0) {
                     void vscode.window.showWarningMessage('No sound packs installed. Use custom sound instead.');
                     return;
@@ -259,9 +455,10 @@ class FahhExtension {
                 const items = packs.map(p => ({ label: p.name, description: p.id }));
                 const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Select a sound pack' });
                 if (!picked) { return; }
-                const packPath = this.soundResolver.pickFromPack(picked.description);
+                if (!picked.description) { return; }
+                const packPath = await this.soundResolver.pickFromPack(picked.description);
                 if (packPath) {
-                    await updateSoundPath(packPath);
+                    await this.configManager.updateSoundPath(packPath);
                     void vscode.window.showInformationMessage(`Sound pack "${picked.label}" selected.`);
                 }
             }),
@@ -276,10 +473,17 @@ class FahhExtension {
                 this.history.clear();
                 void vscode.window.showInformationMessage('Failure history cleared.');
             }),
-            vscode.commands.registerCommand('fahh.replayLast', () => {
+            vscode.commands.registerCommand('fahh.replayLast', async () => {
                 const last = this.history.getLast();
-                if (last && last.soundPath && fs.existsSync(last.soundPath)) {
-                    this.player.play(last.soundPath, { volume: this.config.volume });
+                if (last && last.soundPath) {
+                    try {
+                        await fs.promises.access(last.soundPath);
+                        this.player.play(last.soundPath, { volume: this.config.volume }).catch(err => {
+                            this.logger.debug(`Playback failed: ${err instanceof Error ? err.message : String(err)}`);
+                        });
+                    } catch {
+                        void vscode.window.showWarningMessage('No recent failure to replay.');
+                    }
                 } else {
                     void vscode.window.showWarningMessage('No recent failure to replay.');
                 }
@@ -297,8 +501,8 @@ class FahhExtension {
                     'Reset'
                 );
                 if (confirm === 'Reset') {
-                    await resetAllSettings();
-                    this.config = readConfig();
+                    await this.configManager.resetAllSettings();
+                    this.config = this.configManager.readConfig();
                     this.statusBar.refresh();
                     void vscode.window.showInformationMessage('Fahh settings have been reset.');
                 }
@@ -310,7 +514,7 @@ class FahhExtension {
                     'Factory Reset'
                 );
                 if (confirm === 'Factory Reset') {
-                    await resetAllSettings();
+                    await this.configManager.resetAllSettings();
                     this.history.clear();
                     this.statusBar.resetCounter();
                     try {
@@ -318,7 +522,7 @@ class FahhExtension {
                     } catch (err) {
                         this.logger.warn(`Failed to clear lastVersion: ${err instanceof Error ? err.message : String(err)}`);
                     }
-                    this.config = readConfig();
+                    this.config = this.configManager.readConfig();
                     this.statusBar.refresh();
                     void vscode.window.showInformationMessage('Fahh has been factory reset.');
                 }
@@ -331,15 +535,32 @@ class FahhExtension {
     }
 }
 
+/**
+ * Activates the Fahh extension.
+ * Called by VS Code when the extension is first activated.
+ * @param ctx - The extension context provided by VS Code
+ */
 export function activate(ctx: vscode.ExtensionContext): void {
     const extension = new FahhExtension(ctx);
     extension.start();
 }
 
+/**
+ * Deactivates the Fahh extension.
+ * Called by VS Code when the extension is deactivated.
+ * All disposables are automatically cleaned up by VS Code.
+ */
 export function deactivate(): void {
     // Disposables auto-cleaned by VS Code
 }
 
+/**
+ * Determines whether the welcome screen should be shown.
+ * Shows on first install or when upgrading to a new major version.
+ * @param lastVersion - The previously installed version, or undefined for first install
+ * @param currentVersion - The current extension version
+ * @returns True if the welcome screen should be shown
+ */
 function shouldShowWelcome(lastVersion: string | undefined, currentVersion: string): boolean {
     if (!lastVersion) {
         // First install
@@ -348,6 +569,11 @@ function shouldShowWelcome(lastVersion: string | undefined, currentVersion: stri
     return semverMajor(lastVersion) !== semverMajor(currentVersion);
 }
 
+/**
+ * Extracts the major version number from a semantic version string.
+ * @param version - A semantic version string (e.g., "2.1.0")
+ * @returns The major version number, or 0 if parsing fails
+ */
 function semverMajor(version: string): number {
     const major = Number(version.split('.')[0]);
     return Number.isFinite(major) ? major : 0;

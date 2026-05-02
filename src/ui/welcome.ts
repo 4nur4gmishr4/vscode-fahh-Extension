@@ -1,11 +1,22 @@
 import * as vscode from 'vscode';
 
+/**
+ * Manages the welcome webview panel for first-run experience.
+ * Displays extension features, sound selection, and test audio functionality.
+ */
 export class WelcomePanel {
     public static currentPanel: WelcomePanel | undefined;
     private readonly _panel: vscode.WebviewPanel;
     private _disposables: vscode.Disposable[] = [];
 
-    public static createOrShow(extensionUri: vscode.Uri) {
+    /**
+     * Creates or reveals the welcome panel.
+     * If a panel already exists, it will be revealed instead of creating a new one.
+     * 
+     * @param extensionUri - The URI of the extension root directory
+     * @returns void
+     */
+    public static createOrShow(extensionUri: vscode.Uri): void {
         const column = vscode.window.activeTextEditor
             ? vscode.window.activeTextEditor.viewColumn
             : undefined;
@@ -59,7 +70,13 @@ export class WelcomePanel {
         );
     }
 
-    public dispose() {
+    /**
+     * Disposes of the welcome panel and cleans up resources.
+     * Removes the current panel reference and disposes all event listeners.
+     * 
+     * @returns void
+     */
+    public dispose(): void {
         WelcomePanel.currentPanel = undefined;
         this._panel.dispose();
         while (this._disposables.length) {
@@ -70,7 +87,15 @@ export class WelcomePanel {
         }
     }
 
-    private _getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.Uri) {
+    /**
+     * Generates the HTML content for the welcome webview.
+     * Includes styling, interactive elements, and CSP-compliant scripts.
+     * 
+     * @param webview - The webview instance to generate HTML for
+     * @param extensionUri - The URI of the extension root directory
+     * @returns The complete HTML string for the webview
+     */
+    private _getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.Uri): string {
         const logoUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'resources', 'fahh-logo.jpeg'));
         const audioUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'resources', 'packs', 'default', 'fahh.mp3'));
         const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'resources', 'welcome-client.js'));
@@ -352,6 +377,12 @@ export class WelcomePanel {
     }
 }
 
+/**
+ * Generates a cryptographically random nonce for Content Security Policy.
+ * Used to allow specific inline scripts while maintaining CSP security.
+ * 
+ * @returns A 32-character random string
+ */
 function generateNonce(): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     let result = '';
