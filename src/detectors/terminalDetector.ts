@@ -21,6 +21,28 @@ export class TerminalDetector {
     public register(disposables: vscode.Disposable[]): void {
         // Detect failure via shell integration (reliable, modern)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        
+        const onDidStartTerminalShellExecution = (vscode.window as any).onDidStartTerminalShellExecution;
+        if (onDidStartTerminalShellExecution) {
+            disposables.push(
+                onDidStartTerminalShellExecution((e: any) => {
+                    try {
+                        let output = '';
+                        const stream = e.read();
+                        (async () => {
+                            for await (const chunk of stream) {
+                                output += chunk;
+                                if (output.length > 10000) output = output.slice(-10000); // keep last 10k bytes
+                            }
+                            e.__faultline_output = output;
+                        })().catch(() => {});
+                    } catch (err) {
+                        this.logger.debug('Failed to attach terminal stream reader');
+                    }
+                })
+            );
+        }
+    
         const onDidEndTerminalShellExecution = (vscode.window as any).onDidEndTerminalShellExecution;
         if (onDidEndTerminalShellExecution) {
             disposables.push(
@@ -37,7 +59,8 @@ export class TerminalDetector {
 
                         if (code !== undefined && code !== 0) {
                             const label = e.commandLine?.value || 'Terminal Command';
-                            this.onFailure({ source: 'shell', label, timestamp: Date.now() });
+                            const output = e.__faultline_output || '';
+                            this.onFailure({ source: 'shell', label, output, timestamp: Date.now() });
                         }
                     } catch (err) {
                         this.logger.error('Unhandled rejection in Terminal Detector', err);

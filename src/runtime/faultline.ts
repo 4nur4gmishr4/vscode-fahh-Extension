@@ -66,8 +66,35 @@ export class FaultLineRuntime {
     }
 
     public activate(): void {
+        this.cleanOrphanedTempFiles();
         this.registerDetectors();
         this.statusBar.refresh();
+    }
+
+    private cleanOrphanedTempFiles(): void {
+        try {
+            const os = require('os');
+            const fs = require('fs');
+            const path = require('path');
+            const tmpDir = os.tmpdir();
+            const files = fs.readdirSync(tmpDir);
+            let cleaned = 0;
+            for (const file of files) {
+                if (file.startsWith('fahh_play_') && file.endsWith('.vbs')) {
+                    try {
+                        fs.unlinkSync(path.join(tmpDir, file));
+                        cleaned++;
+                    } catch (e) {
+                        // ignore
+                    }
+                }
+            }
+            if (cleaned > 0) {
+                this.logger.debug(`Cleaned up ${cleaned} orphaned VBScript files`);
+            }
+        } catch (e) {
+            this.logger.error('Failed to clean orphaned temp files', e);
+        }
     }
 
     public registerDetectors(): void {
@@ -142,6 +169,10 @@ export class FaultLineRuntime {
                 this.statusBar.flash();
             }
 
+            if (config.ai.errorExplanationEnabled && config.ai.errorExplanationAutoShow) {
+                void this.errorExplanation.showFailureExplanation(event);
+            }
+
             if (config.ui.showNotification) {
                 const message = `FaultLine: [${source}] ${sanitizedLabel}`;
                 // VS Code notification buttons (appears sequential, "Configure" will be first)
@@ -152,8 +183,6 @@ export class FaultLineRuntime {
                         void vscode.commands.executeCommand('faultline.openSettings');
                     }
                 });
-            } else if (config.ai.errorExplanationEnabled && config.ai.errorExplanationAutoShow) {
-                void this.errorExplanation.showFailureExplanation(event);
             }
         } catch (err) {
             this.logger.error('Failed to handle failure', err);

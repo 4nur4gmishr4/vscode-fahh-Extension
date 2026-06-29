@@ -98,6 +98,7 @@ export interface HistoryEntry {
     timestamp: number;
     source: FailureSource;
     label: string;
+    output?: string;
     soundPath: string;
     executionTime?: number;
 }
@@ -109,6 +110,7 @@ export interface AudioOptions {
 export interface FailureEvent {
     source: FailureSource;
     label: string;
+    output?: string;
     timestamp: number;
     executionTime?: number;
 }

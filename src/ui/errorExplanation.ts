@@ -97,7 +97,8 @@ export class ErrorExplanationManager {
 
         try {
             void this.panel.webview.postMessage({ command: 'explanationLoading' });
-            const explanation = await this.aiService.getAiExplanation(failure.label);
+            const promptText = failure.output ? `Command: ${failure.label}\n\nTerminal Output:\n${failure.output}` : failure.label;
+            const explanation = await this.aiService.getAiExplanation(promptText);
             
             if (this.panel) {
                 if (explanation) {

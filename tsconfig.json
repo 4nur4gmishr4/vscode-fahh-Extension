@@ -1,26 +1,41 @@
 {
-    "compilerOptions": {
-        "module": "commonjs",
-        "target": "ES2022",
-        "outDir": "out",
-        "lib": ["ES2022", "DOM"],
-        "types": ["node", "jest"],
-        "sourceMap": true,
-        "rootDir": "src",
-        "strict": true,
-        "esModuleInterop": true,
-        "forceConsistentCasingInFileNames": true,
-        "skipLibCheck": true,
-        "noUnusedLocals": true,
-        "noUnusedParameters": true,
-        "noFallthroughCasesInSwitch": true,
-        "noImplicitOverride": true,
-        "incremental": true,
-        "tsBuildInfoFile": "./out/.tsbuildinfo",
-        "declaration": false,
-        "declarationMap": false,
-        "removeComments": true
-    },
-    "include": ["src/**/*"],
-    "exclude": ["node_modules", ".vscode-test", "out", "coverage", "src/**/*.test.ts", "src/**/*.spec.ts", "__mocks__"]
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "ES2022",
+    "outDir": "out",
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "types": [
+      "node"
+    ],
+    "sourceMap": true,
+    "rootDir": "src",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "incremental": true,
+    "tsBuildInfoFile": "./out/.tsbuildinfo",
+    "declaration": false,
+    "declarationMap": false,
+    "removeComments": true
+  },
+  "include": [
+    "src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    ".vscode-test",
+    "out",
+    "coverage",
+    "src/**/*.test.ts",
+    "src/**/*.spec.ts",
+    "__mocks__"
+  ]
 }
