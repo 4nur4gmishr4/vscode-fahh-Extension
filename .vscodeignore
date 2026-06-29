@@ -21,6 +21,6 @@ node_modules/@vscode/codicons/*
 tsconfig.json
 tsconfig.test.json
 package-lock.json
-FahhLogo_original.png
+
 **/*.ts
 **/*.tsbuildinfo
