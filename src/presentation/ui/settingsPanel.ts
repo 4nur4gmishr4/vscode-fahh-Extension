@@ -77,7 +77,7 @@ export class SettingsPanel {
                     
                     case 'fetchModels':
                         if (message.provider) {
-                            let keyToUse = message.key;
+                            let keyToUse: string | undefined | null = message.key;
                             if (!keyToUse) {
                                 keyToUse = await this.secretManager.getApiKey(message.provider);
                             }
